@@ -1,0 +1,19 @@
+{
+  "name": "quiz-profetas-menores",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Quiz Bíblico — Profetas Menores: quiz com usuários, ranking, histórico, conquistas, estatísticas, admin e PWA (React + Node/Express + Supabase/PostgreSQL)",
+  "scripts": {
+    "setup": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "start:backend": "npm --prefix backend start",
+    "build": "npm --prefix frontend run build",
+    "test": "npm --prefix backend run test:files",
+    "icons": "python3 scripts/generate-icons.py",
+    "make-admin": "node scripts/make-admin.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

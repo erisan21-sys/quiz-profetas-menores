@@ -1,0 +1,21 @@
+# Dependências e builds
+node_modules/
+dist/
+build/
+.vite/
+
+# Segredos — NUNCA versionar
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# Dados do driver local (desenvolvimento)
+backend/data/
+
+# Logs e caches
+*.log
+npm-debug.log*
+coverage/
+.DS_Store

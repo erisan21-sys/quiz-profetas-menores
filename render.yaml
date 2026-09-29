@@ -1,0 +1,40 @@
+# ============================================================================
+#  QUIZ BÍBLICO — PROFETAS MENORES · Blueprint do Render (backend)
+# ----------------------------------------------------------------------------
+#  Uso: repositório no GitHub/GitLab → Render → "New +" → "Blueprint".
+#  O Render lê este arquivo e cria o serviço web com health check automático.
+#  As variáveis marcadas com `sync: false` são pedidas no primeiro deploy
+#  (cole os valores do seu Supabase etc.). TOKEN_SECRET e ADMIN_TOKEN podem
+#  ser gerados pelo próprio Render (generateValue).
+#
+#  Preferência de plataforma: RENDER (compatível 100% com Node/Express).
+#  Railway também funciona: root backend/, start `npm start`, health `/health`.
+# ============================================================================
+services:
+  - type: web
+    name: quiz-profetas-menores-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      - key: DB_DRIVER
+        value: supabase
+      - key: CORS_ORIGIN
+        sync: false            # ex.: https://quiz-profetas-menores.vercel.app
+      - key: SUPABASE_URL
+        sync: false            # https://xxxx.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false            # chave service_role (SEGREDO — só no backend)
+      - key: TOKEN_SECRET
+        generateValue: true    # segredo HMAC das sessões
+      - key: ADMIN_TOKEN
+        generateValue: true    # token da área /admin
+      - key: HTTP_LOG
+        value: combined

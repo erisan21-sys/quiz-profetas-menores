@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0"
+    />
+    <title>Quiz Bíblico — Profetas Menores</title>
+    <meta
+      name="description"
+      content="Teste seus conhecimentos sobre o 12 livros dos Profetas Menores. Quiz com ranking, histórico, conquistas e estatísticas."
+    />
+    <meta name="theme-color" content="#0b1020" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Quiz Profetas" />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <meta property="og:title" content="Quiz Bíblico — Profetas Menores" />
+    <meta
+      property="og:description"
+      content="Perguntas sobre os 12 Profetas Menores. Pontuação, ranking e conquistas."
+    />
+    <meta property="og:type" content="website" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      O Quiz Bíblico — Profetas Menores precisa de JavaScript habilitado para funcionar.
+    </noscript>
+    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Registro do service worker (PWA). Falha silenciosa em dev sem HTTPS.
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {
+            /* modo offline indisponível neste navegador/ambiente */
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
