@@ -1,23 +1,12 @@
-# ============================================================================
-#  QUIZ BÍBLICO — PROFETAS MENORES · Blueprint do Render (backend)
-# ----------------------------------------------------------------------------
-#  Uso: repositório no GitHub/GitLab → Render → "New +" → "Blueprint".
-#  O Render lê este arquivo e cria o serviço web com health check automático.
-#  As variáveis marcadas com `sync: false` são pedidas no primeiro deploy
-#  (cole os valores do seu Supabase etc.). TOKEN_SECRET e ADMIN_TOKEN podem
-#  ser gerados pelo próprio Render (generateValue).
-#
-#  Preferência de plataforma: RENDER (compatível 100% com Node/Express).
-#  Railway também funciona: root backend/, start `npm start`, health `/health`.
-# ============================================================================
+# Quiz Bíblico — Profetas Menores
+# Deploy único no Render: backend Express + build do frontend.
 services:
   - type: web
-    name: quiz-profetas-menores-api
+    name: quiz-profetas-menores
     runtime: node
-    rootDir: backend
     plan: free
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: npm run setup && npm run build
+    startCommand: npm run start:backend
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
@@ -27,14 +16,18 @@ services:
       - key: DB_DRIVER
         value: supabase
       - key: CORS_ORIGIN
-        sync: false            # ex.: https://quiz-profetas-menores.vercel.app
+        value: https://quiz-profetas-menores.onrender.com
       - key: SUPABASE_URL
-        sync: false            # https://xxxx.supabase.co
+        value: https://grgsclgmjwkeeiejscul.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false            # chave service_role (SEGREDO — só no backend)
+        sync: false
       - key: TOKEN_SECRET
-        generateValue: true    # segredo HMAC das sessões
+        generateValue: true
       - key: ADMIN_TOKEN
-        generateValue: true    # token da área /admin
+        generateValue: true
       - key: HTTP_LOG
         value: combined
+      - key: QUIZ_SIZE
+        value: 20
+      - key: QUIZ_DISTRIBUTION
+        value: facil:6,medio:8,dificil:6
