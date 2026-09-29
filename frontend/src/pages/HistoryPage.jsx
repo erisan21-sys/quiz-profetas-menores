@@ -1,29 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { useApp } from '../context/AppContext.jsx';
 import { Link } from '../components/Link.jsx';
-import { DifficultyBadge, ErrorState, Loading, Modal, SourceBadge } from '../components/ui.jsx';
+import { DifficultyBadge, ErrorState, Loading, Modal, RefreshBanner, SourceBadge } from '../components/ui.jsx';
 import { formatDate, formatDurationLabel, formatNumber, formatPercent } from '../lib/format.js';
+import { useResilientQuery } from '../lib/useResilientQuery.js';
 
 /** Meu histórico de partidas + abertura de partidas anteriores. */
 export function HistoryPage() {
   const { user } = useApp();
-  const [items, setItems] = useState(null);
-  const [error, setError] = useState(null);
   const [openAttempt, setOpenAttempt] = useState(null);
   const [attemptDetail, setAttemptDetail] = useState(null);
 
-  const load = useCallback(() => {
-    if (!user) return;
-    setError(null);
-    setItems(null);
-    api
-      .history(user.id, { limit: 100 })
-      .then((data) => setItems(data.items))
-      .catch(setError);
-  }, [user]);
-
-  useEffect(load, [load]);
+  const {
+    data: items, error, waking, refreshing, reload: load,
+  } = useResilientQuery(
+    user ? `history-${user.id}` : null,
+    () => (user ? api.history(user.id, { limit: 100 }).then((data) => data.items) : Promise.resolve(null)),
+    [user?.id],
+  );
 
   useEffect(() => {
     if (!openAttempt) {
@@ -51,8 +46,9 @@ export function HistoryPage() {
       <h1 className="page-title">📜 Meu histórico</h1>
       <p className="page-sub">Todas as suas partidas finalizadas, com data, placar e duração oficial.</p>
 
-      {error && <ErrorState error={error} onRetry={load} />}
+      {error && !items && <ErrorState error={error} onRetry={load} />}
       {!items && !error && <Loading label="Carregando partidas…" />}
+      {items && <RefreshBanner waking={waking} refreshing={refreshing} error={error} onRetry={load} />}
 
       {items && items.length === 0 && (
         <div className="card center">

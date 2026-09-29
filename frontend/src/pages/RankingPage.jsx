@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/client.js';
 import { useApp } from '../context/AppContext.jsx';
-import { ErrorState, Loading } from '../components/ui.jsx';
+import { ErrorState, Loading, RefreshBanner } from '../components/ui.jsx';
 import { formatDate, formatNumber, formatPercent, medalFor } from '../lib/format.js';
+import { useResilientQuery } from '../lib/useResilientQuery.js';
 
 const PERIODS = [
   { id: 'today', label: 'HOJE' },
@@ -23,21 +24,16 @@ export function RankingPage({ params }) {
   const { user } = useApp();
   const [period, setPeriod] = useState(params.get('periodo') || 'all');
   const [mode, setMode] = useState('all');
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    let alive = true;
-    setError(null);
-    setData(null);
-    api
-      .ranking({ period, difficulty: mode })
-      .then((result) => alive && setData(result))
-      .catch((err) => alive && setError(err));
-    return () => {
-      alive = false;
-    };
-  }, [period, mode]);
+  // Trocar de filtro (período/dificuldade) mantém a tabela anterior visível
+  // — sem piscar para um spinner em branco — enquanto o novo recorte chega.
+  const {
+    data, error, waking, refreshing, reload,
+  } = useResilientQuery(
+    `ranking-${period}-${mode}`,
+    () => api.ranking({ period, difficulty: mode }),
+    [period, mode],
+  );
 
   return (
     <div className="rise">
@@ -77,8 +73,9 @@ export function RankingPage({ params }) {
         </div>
       </div>
 
-      {error && <ErrorState error={error} />}
+      {error && !data && <ErrorState error={error} onRetry={reload} />}
       {!data && !error && <Loading label="Montando o ranking…" />}
+      {data && <RefreshBanner waking={waking} refreshing={refreshing} error={error} onRetry={reload} />}
 
       {data && (
         <>
@@ -137,14 +134,9 @@ export function RankingPage({ params }) {
 }
 
 function PublicAttempts() {
-  const [items, setItems] = useState(null);
-  const [error, setError] = useState(null);
+  const { data: items, error } = useResilientQuery('public-attempts', () => api.publicAttempts(), []);
 
-  useEffect(() => {
-    api.publicAttempts().then(setItems).catch(setError);
-  }, []);
-
-  if (error) return <p className="faint">Indisponível no momento.</p>;
+  if (error && !items) return <p className="faint">Indisponível no momento.</p>;
   if (!items) return <Loading label="Carregando histórico público…" />;
   if (!items.items.length) return <p className="faint">Nenhuma partida pública ainda.</p>;
 

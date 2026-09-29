@@ -10,6 +10,22 @@ export function Loading({ label = 'Carregando…' }) {
   );
 }
 
+/**
+ * Placeholder exibido enquanto o código de uma tela ainda está sendo
+ * baixado (React.lazy). Some em fração de segundo em conexões boas; em
+ * conexões lentas evita um flash em branco entre a troca de telas.
+ */
+export function PageSkeleton() {
+  return (
+    <div className="skeleton-page" aria-hidden="true">
+      <div className="skeleton-block" style={{ height: 28, width: '55%' }} />
+      <div className="skeleton-block" style={{ height: 14, width: '80%' }} />
+      <div className="skeleton-block" style={{ height: 120, width: '100%', marginTop: 8 }} />
+      <div className="skeleton-block" style={{ height: 120, width: '100%' }} />
+    </div>
+  );
+}
+
 /** Estado de erro com ação de repetição. */
 export function ErrorState({ error, onRetry }) {
   return (
@@ -21,6 +37,40 @@ export function ErrorState({ error, onRetry }) {
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Faixa discreta usada com useResilientQuery: aparece só quando já existe
+ * conteúdo em tela (evita telas em branco) e avisa sutilmente que os dados
+ * estão sendo atualizados ou que o servidor gratuito está "acordando".
+ */
+export function RefreshBanner({ waking, refreshing, error, onRetry }) {
+  if (!waking && !refreshing && !error) return null;
+  if (error) {
+    return (
+      <p className="faint mb-16" style={{ fontSize: 13 }}>
+        ⚠️ Não foi possível atualizar agora; exibindo os últimos dados salvos neste aparelho.{' '}
+        {onRetry && (
+          <button type="button" className="linklike" onClick={onRetry}>
+            Tentar de novo
+          </button>
+        )}
+      </p>
+    );
+  }
+  if (waking) {
+    return (
+      <p className="faint mb-16" role="status" style={{ fontSize: 13 }}>
+        <span className="dot-pulse" aria-hidden="true" /> Acordando o servidor (plano gratuito)…
+        exibindo os últimos dados enquanto isso.
+      </p>
+    );
+  }
+  return (
+    <p className="faint mb-16" role="status" style={{ fontSize: 13 }}>
+      <span className="dot-pulse" aria-hidden="true" /> Atualizando…
+    </p>
   );
 }
 

@@ -1,63 +1,16 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api/client.js';
 import { Link } from '../components/Link.jsx';
-import { ErrorState, Loading, StatsGrid } from '../components/ui.jsx';
+import { ErrorState, Loading, RefreshBanner, StatsGrid } from '../components/ui.jsx';
 import { formatNumber, formatPercent } from '../lib/format.js';
 import { useApp } from '../context/AppContext.jsx';
+import { api } from '../api/client.js';
+import { useResilientQuery } from '../lib/useResilientQuery.js';
 
 /** Tela inicial: título, indicadores globais e ações principais. */
 export function HomePage() {
   const { user, notify } = useApp();
-  const [stats, setStats] = useState(null);
-  const [error, setError] = useState(null);
-  const [waking, setWaking] = useState(false);
-
-  // Carrega com insistência: no plano gratuito o Render pode levar ~40-60 s
-  // para "acordar" no primeiro acesso do dia. Em vez de mostrar erro cedo
-  // demais, aguardamos com aviso amigável e só então exibimos o ErrorState.
-  const load = async () => {
-    setError(null);
-    setWaking(false);
-    const waits = [0, 3000, 5000, 8000, 12000, 15000, 20000];
-    for (let attempt = 0; attempt < waits.length; attempt += 1) {
-      if (waits[attempt]) {
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((resolve) => setTimeout(resolve, waits[attempt]));
-        setWaking(true);
-      }
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        setStats(await api.stats());
-        setWaking(false);
-        return;
-      } catch (err) {
-        if (attempt < waits.length - 1) continue;
-        setError(err);
-        const cached = window.localStorage.getItem('quiz-profetas:v1:cached-stats');
-        if (cached) {
-          try {
-            setStats(JSON.parse(cached));
-          } catch {
-            /* cache ilegível: segue com o estado de erro */
-          }
-        }
-      }
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  useEffect(() => {
-    if (stats) {
-      try {
-        window.localStorage.setItem('quiz-profetas:v1:cached-stats', JSON.stringify(stats));
-      } catch {
-        /* ignora */
-      }
-    }
-  }, [stats]);
+  const {
+    data: stats, error, waking, refreshing, reload: load,
+  } = useResilientQuery('home-stats', () => api.stats(), []);
 
   return (
     <div className="rise">
@@ -80,15 +33,7 @@ export function HomePage() {
           }
         />
       )}
-      {error && stats && (
-        <p className="faint mb-8" style={{ fontSize: 13 }}>
-          ⚠️ O servidor não respondeu agora; exibindo os últimos indicadores salvos neste
-          aparelho.{' '}
-          <button type="button" className="linklike" onClick={load}>
-            Tentar de novo
-          </button>
-        </p>
-      )}
+      {stats && <RefreshBanner waking={waking} refreshing={refreshing} error={error} onRetry={load} />}
 
       {stats && (
         <>

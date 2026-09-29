@@ -1,17 +1,22 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useRoute } from './lib/router.jsx';
 import { AppProvider } from './context/AppContext.jsx';
 import { Layout } from './components/Layout.jsx';
+import { PageSkeleton } from './components/ui.jsx';
 
-import HomePage from './pages/HomePage.jsx';
-import RegisterPage from './pages/RegisterPage.jsx';
-import QuizPage from './pages/QuizPage.jsx';
-import ResultPage from './pages/ResultPage.jsx';
-import RankingPage from './pages/RankingPage.jsx';
-import HistoryPage from './pages/HistoryPage.jsx';
-import ProfilePage from './pages/ProfilePage.jsx';
-import StatsPage from './pages/StatsPage.jsx';
-import AdminPage from './pages/AdminPage.jsx';
+// Carregamento sob demanda: cada tela só baixa seu próprio código quando o
+// jogador navega até ela pela primeira vez. Isso deixa o carregamento
+// inicial do app mais leve e rápido (menos JS para baixar/interpretar antes
+// da primeira tela aparecer), sem mudar nada do comportamento visível.
+const HomePage = lazy(() => import('./pages/HomePage.jsx'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage.jsx'));
+const QuizPage = lazy(() => import('./pages/QuizPage.jsx'));
+const ResultPage = lazy(() => import('./pages/ResultPage.jsx'));
+const RankingPage = lazy(() => import('./pages/RankingPage.jsx'));
+const HistoryPage = lazy(() => import('./pages/HistoryPage.jsx'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage.jsx'));
+const StatsPage = lazy(() => import('./pages/StatsPage.jsx'));
+const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
 
 /** Roteamento da aplicação (hash router, compatível com PWA e host estático). */
 export function App() {
@@ -73,7 +78,11 @@ export function App() {
 
   return (
     <Layout route={route} isAdmin={hasAdminSession || pathname === '/admin'}>
-      {page}
+      <Suspense fallback={<PageSkeleton />}>
+        <div key={pathname} className="page-transition">
+          {page}
+        </div>
+      </Suspense>
     </Layout>
   );
 }

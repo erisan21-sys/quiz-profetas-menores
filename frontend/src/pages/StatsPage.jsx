@@ -1,28 +1,22 @@
-import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
-import { ErrorState, Loading, StatsGrid } from '../components/ui.jsx';
+import { ErrorState, Loading, RefreshBanner, StatsGrid } from '../components/ui.jsx';
 import { formatNumber, formatPercent } from '../lib/format.js';
+import { useResilientQuery } from '../lib/useResilientQuery.js';
 
 /** Dashboard público de estatísticas. */
 export function StatsPage() {
-  const [stats, setStats] = useState(null);
-  const [error, setError] = useState(null);
+  const {
+    data: stats, error, waking, refreshing, reload: load,
+  } = useResilientQuery('global-stats', () => api.stats(), []);
 
-  const load = () => {
-    setError(null);
-    setStats(null);
-    api.stats().then(setStats).catch(setError);
-  };
-
-  useEffect(load, []);
-
-  if (error) return <ErrorState error={error} onRetry={load} />;
+  if (error && !stats) return <ErrorState error={error} onRetry={load} />;
   if (!stats) return <Loading label="Calculando estatísticas…" />;
 
   return (
     <div className="rise">
       <h1 className="page-title">📊 Estatísticas</h1>
       <p className="page-sub">Números agregados de toda a comunidade, calculados no servidor.</p>
+      <RefreshBanner waking={waking} refreshing={refreshing} error={error} onRetry={load} />
 
       <StatsGrid
         items={[

@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/client.js';
 import { useApp } from '../context/AppContext.jsx';
 import { Link } from '../components/Link.jsx';
 import { AchievementsGrid } from '../components/Achievements.jsx';
 import { LineChart } from '../components/LineChart.jsx';
-import { ErrorState, Loading, Modal, StatsGrid } from '../components/ui.jsx';
+import { ErrorState, Loading, Modal, RefreshBanner, StatsGrid } from '../components/ui.jsx';
 import { formatDate, formatDurationLabel, formatNumber, formatPercent, medalFor } from '../lib/format.js';
+import { useResilientQuery } from '../lib/useResilientQuery.js';
 
 /** Perfil do jogador: posição, recordes, evolução, conquistas e privacidade. */
 export function ProfilePage({ segments }) {
@@ -13,22 +14,19 @@ export function ProfilePage({ segments }) {
   const targetId = segments[1] || user?.id;
   const isSelf = Boolean(user) && targetId === user.id;
 
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => {
-    setError(null);
-    setData(null);
-    const call = isSelf ? api.myProfile() : api.profile(targetId);
-    call.then(setData).catch(setError);
-  }, [isSelf, targetId]);
+  const {
+    data, error, waking, refreshing, reload: load,
+  } = useResilientQuery(
+    targetId ? `profile-${targetId}` : null,
+    () => (isSelf ? api.myProfile() : api.profile(targetId)),
+    [isSelf, targetId],
+  );
 
-  useEffect(load, [load]);
-
-  if (error) return <ErrorState error={error} onRetry={load} />;
+  if (error && !data) return <ErrorState error={error} onRetry={load} />;
   if (!data) return <Loading label="Carregando perfil…" />;
 
   const { stats, rank, achievements, history } = data;
@@ -83,6 +81,8 @@ export function ProfilePage({ segments }) {
           <span className="badge badge-muted">fora do ranking</span>
         )}
       </div>
+
+      <RefreshBanner waking={waking} refreshing={refreshing} error={error} onRetry={load} />
 
       <StatsGrid
         items={[

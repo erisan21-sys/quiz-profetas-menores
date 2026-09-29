@@ -106,9 +106,23 @@ export function createApp(options = {}) {
     app.use(
       express.static(options.staticDir, {
         extensions: ['html'],
+        // Arquivos dentro de /assets/ saem do build do Vite com hash no nome
+        // (ex.: index-93af1c.js) — o conteúdo nunca muda sob o mesmo nome,
+        // então podem ficar em cache por 1 ano no navegador. index.html e o
+        // service worker continuam sempre revalidados para que atualizações
+        // do app cheguem aos jogadores assim que publicadas.
+        maxAge: '1y',
+        immutable: true,
         setHeaders(res, filePath) {
           if (filePath.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
           if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
+          if (filePath.endsWith('manifest.webmanifest')) res.setHeader('Cache-Control', 'no-cache');
+          if (!filePath.includes(`${path.sep}assets${path.sep}`) && !filePath.endsWith('sw.js')
+            && !filePath.endsWith('index.html') && !filePath.endsWith('manifest.webmanifest')) {
+            // ícones e outros arquivos fora de /assets/ (sem hash no nome):
+            // cache mais curto, só para não ficarem presos a uma versão antiga.
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+          }
         },
       }),
     );
