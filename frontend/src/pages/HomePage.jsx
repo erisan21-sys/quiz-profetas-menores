@@ -103,7 +103,7 @@ export function HomePage() {
 
           <div className="card mt-24">
             <h2 className="card-title">📖 Escolha o profeta</h2>
-            <p className="faint">Cada profeta tem 5 perguntas. Também existe o modo com todos os 12.</p>
+            <p className="faint">Cada profeta tem um banco de 10 perguntas (5 sorteadas a cada partida, para variar sempre). Também existe o modo com todos os 12.</p>
             <div className="home-actions">
               <Link to={user ? '/quiz?profeta=todos&modo=mixed' : '/entrar?next=/quiz?profeta=todos&modo=mixed'} className="btn btn-primary">🎯 TODOS OS 12</Link>
               {[['oseias','Oséias'],['joel','Joel'],['amos','Amós'],['obadias','Obadias'],['jonas','Jonas'],['miqueias','Miquéias'],['naum','Naum'],['habacuque','Habacuque'],['sofonias','Sofonias'],['ageu','Ageu'],['zacarias','Zacarias'],['malaquias','Malaquias']].map(([id,name]) => (

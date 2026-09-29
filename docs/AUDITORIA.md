@@ -4,7 +4,7 @@
 
 - Daniel removido do conteúdo e da interface.
 - Criado catálogo dos 12 Profetas Menores.
-- 60 perguntas iniciais, 5 por profeta.
+- Banco ampliado de 60 para **120 perguntas — 10 por profeta** (mantendo as 60 originais intactas e somando 60 novas).
 - Seleção individual por profeta no servidor.
 - Modo geral preserva a partida de 20 perguntas com distribuição 6/8/6.
 - Banco recebeu os campos `book` e `book_name`; partidas receberam `prophet`.
@@ -12,9 +12,9 @@
 
 ## Verificação executada
 
-- Banco de questões carregado: 60 questões.
-- 12 profetas encontrados: 5 questões por profeta.
-- Seleção individual validada: 5 questões (2 fáceis, 2 médias, 1 difícil).
+- Banco de questões carregado: 120 questões.
+- 12 profetas encontrados: 10 questões por profeta (4 fáceis, 4 médias, 2 difíceis).
+- Seleção individual por partida: 5 questões sorteadas do banco de 10 (2 fáceis, 2 médias, 1 difícil).
 - Seleção geral validada: 20 questões (6 fáceis, 8 médias, 6 difíceis).
-- Testes unitários de regras executados: 34/34 passando.
-- Build completo do frontend não foi executado neste ambiente porque a instalação das dependências npm não foi concluída dentro do ambiente de execução.
+- Suíte completa de testes executada: 84/84 passando.
+- Build de produção do frontend executado com sucesso (`npm run build`).

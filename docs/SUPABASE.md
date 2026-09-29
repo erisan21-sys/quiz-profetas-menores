@@ -20,9 +20,16 @@
      * `protect_answer_insert` — resposta só em partida STARTED, do dono, na ordem sorteada;
    * funções de leitura agregada: `leaderboard()`, `player_rank()`, `global_stats()`,
      `player_stats()`.
-2. `database/seed.sql` — 60 perguntas (5 por profeta) + 7 conquistas.
+2. `database/seed.sql` — 120 perguntas (10 por profeta) + 7 conquistas.
    Idempotente (`on conflict do nothing`).
 3. `database/rls.sql` — habilita RLS em todas as tabelas e cria as policies públicas.
+
+> **Projeto Supabase já existente com o seed antigo (60 perguntas)?** Não é
+> necessário recriar o banco do zero. Rode apenas
+> `database/migration-add-60-questions.sql` no SQL Editor: ele adiciona as 60
+> perguntas novas (5 por profeta) sem tocar nos dados existentes de usuários,
+> ranking, histórico, partidas ou conquistas, e é seguro rodar mais de uma vez
+> (não duplica linhas).
 
 ## 3. Modelo de segurança (RLS)
 
