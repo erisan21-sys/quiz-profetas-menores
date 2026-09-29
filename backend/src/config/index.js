@@ -39,12 +39,12 @@ export const config = {
 
   rateLimit: {
     windowMinutes: toInt(process.env.RATE_WINDOW_MINUTES, 15),
-    max: toInt(process.env.RATE_MAX, 400),
-    maxQuiz: toInt(process.env.RATE_MAX_QUIZ, 180),
+    max: toInt(process.env.RATE_MAX, 600),
+    maxQuiz: toInt(process.env.RATE_MAX_QUIZ, 300),
     maxAdmin: toInt(process.env.RATE_MAX_ADMIN, 120),
-    maxAuth: toInt(process.env.RATE_MAX_AUTH, 20),
-    maxStart: toInt(process.env.RATE_MAX_START, 40),
-    maxAnswer: toInt(process.env.RATE_MAX_ANSWER, 90),
+    maxAuth: toInt(process.env.RATE_MAX_AUTH, 30),
+    maxStart: toInt(process.env.RATE_MAX_START, 60),
+    maxAnswer: toInt(process.env.RATE_MAX_ANSWER, 180),
   },
 
   game: {
