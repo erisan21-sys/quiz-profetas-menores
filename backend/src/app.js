@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -112,7 +113,7 @@ export function createApp(options = {}) {
       }),
     );
     app.get(/^\/(?!api\/).*/, (_req, res, next) => {
-      res.sendFile(`${options.staticDir}/index.html`, (err) => err && next(err));
+      res.sendFile(path.resolve(options.staticDir, 'index.html'), (err) => err && next(err));
     });
   }
 

@@ -37,11 +37,22 @@ async function main() {
   assertConfig();
   applyGameRules();
 
-  // Em produção, serve o build do frontend se ele existir (deploy único).
-  const distDir = path.resolve(__dirname, '../../frontend/dist');
-  const staticDir =
-    process.env.STATIC_DIR ||
-    (config.isProduction && fs.existsSync(distDir) ? distDir : null);
+  // Em produção ou monolito, serve o build do frontend se ele existir.
+  const distCandidates = [
+    process.env.STATIC_DIR,
+    path.resolve(__dirname, '../../frontend/dist'),
+    path.resolve(process.cwd(), 'frontend/dist'),
+    path.resolve(process.cwd(), 'dist'),
+    path.resolve(__dirname, '../public'),
+  ].filter(Boolean);
+
+  let staticDir = null;
+  for (const dir of distCandidates) {
+    if (fs.existsSync(dir) && fs.existsSync(path.join(dir, 'index.html'))) {
+      staticDir = dir;
+      break;
+    }
+  }
 
   const app = createApp({ staticDir });
 

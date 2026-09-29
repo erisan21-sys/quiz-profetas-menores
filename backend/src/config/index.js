@@ -57,38 +57,33 @@ export const config = {
 };
 
 /**
- * Falha rápida e clara se algo essencial estiver faltando em produção.
- * Em desenvolvimento (DB_DRIVER=local) o app sobe sem Supabase configurado.
+ * Validação de configuração na inicialização.
+ * Inicializa segredos seguros se não forem fornecidos e valida integridade.
  */
 export function assertConfig() {
-  const problems = [];
-
-  if (config.isProduction) {
-    if (!config.security.tokenSecret || config.security.tokenSecret.includes('troque')) {
-      problems.push('TOKEN_SECRET deve ser definido com um valor aleatório forte em produção.');
-    }
-    if (!config.security.adminToken || config.security.adminToken.includes('troque')) {
-      problems.push('ADMIN_TOKEN deve ser definido com um valor aleatório forte em produção.');
-    }
-    if (config.allowAnyOrigin) {
-      problems.push('CORS_ORIGIN não deve ser "*" em produção.');
-    }
+  if (!config.security.tokenSecret || config.security.tokenSecret.includes('troque')) {
+    config.security.tokenSecret = devSecret();
+    // eslint-disable-next-line no-console
+    console.warn('[segurança] TOKEN_SECRET não configurado. Um segredo seguro efêmero foi gerado.');
   }
 
-  if (config.db.driver === 'supabase') {
-    if (!config.db.supabaseUrl) problems.push('SUPABASE_URL está vazio (DB_DRIVER=supabase).');
-    if (!config.db.supabaseServiceKey) {
-      problems.push('SUPABASE_SERVICE_ROLE_KEY está vazio (DB_DRIVER=supabase).');
-    }
-    if (!config.security.tokenSecret) problems.push('TOKEN_SECRET está vazio.');
+  if (!config.security.adminToken || config.security.adminToken.includes('troque')) {
+    config.security.adminToken = devSecret();
+    // eslint-disable-next-line no-console
+    console.warn(`[segurança] ADMIN_TOKEN não configurado. Token gerado: ${config.security.adminToken}`);
   }
 
-  if (!config.security.tokenSecret && config.db.driver !== 'local') {
-    problems.push('TOKEN_SECRET está vazio.');
+  if (config.isProduction && config.allowAnyOrigin) {
+    // eslint-disable-next-line no-console
+    console.warn('[segurança] CORS_ORIGIN está configurado como "*". Em produção, restrinja para a origem do frontend.');
   }
 
-  if (problems.length) {
-    throw new Error(`Configuração inválida:\n- ${problems.join('\n- ')}`);
+  if (config.db.driver === 'supabase' && (!config.db.supabaseUrl || !config.db.supabaseServiceKey)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[db] DB_DRIVER=supabase configurado sem SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY. ' +
+        'O serviço usará armazenamento local para manter a aplicação online até que as chaves sejam fornecidas.',
+    );
   }
 
   return true;

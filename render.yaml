@@ -1,16 +1,21 @@
-# Quiz Bíblico — Profetas Menores
-# Deploy único no Render: backend Express + build do frontend.
+# ============================================================================
+#  QUIZ BÍBLICO — PROFETAS MENORES · Blueprint do Render
+# ----------------------------------------------------------------------------
+#  Uso: repositório no GitHub/GitLab → Render → "New +" → "Blueprint".
+#  O Render lê este arquivo e cria o serviço web com health check automático.
+#  Deploy único no Render: backend Express + build do frontend React/PWA.
+# ============================================================================
 services:
   - type: web
     name: quiz-profetas-menores
     runtime: node
     plan: free
-    buildCommand: cd backend && npm install && cd ../frontend && npm install && npm run build
-    startCommand: cd backend && npm start
+    buildCommand: npm run build
+    startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
-        value: 22
+        value: 20
       - key: NODE_ENV
         value: production
       - key: DB_DRIVER

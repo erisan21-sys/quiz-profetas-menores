@@ -13,9 +13,11 @@ frontend/.env
 
 # Dados do driver local (desenvolvimento)
 backend/data/
+data/
 
 # Logs e caches
 *.log
 npm-debug.log*
 coverage/
 .DS_Store
+.npm/
