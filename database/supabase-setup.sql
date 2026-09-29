@@ -1,0 +1,692 @@
+-- ============================================================================
+--  QUIZ BÍBLICO — PROFETAS MENORES  ·  v1.0
+--  Esquema do banco (PostgreSQL / Supabase)
+-- ----------------------------------------------------------------------------
+--  Executar no SQL Editor do Supabase (ou via psql) na ordem:
+--     1) database/schema.sql   (este arquivo)
+--     2) database/seed.sql     (60 perguntas + conquistas)
+--     3) database/rls.sql      (Row Level Security + policies)
+-- ============================================================================
+
+-- Extensões -----------------------------------------------------------------
+create extension if not exists "pgcrypto";   -- gen_random_uuid()
+create extension if not exists "citext";     -- nicknames case-insensitive
+
+-- Enums ---------------------------------------------------------------------
+do $$ begin
+  create type question_difficulty as enum ('facil', 'medio', 'dificil');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type answer_letter as enum ('A', 'B', 'C', 'D');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type attempt_status as enum ('STARTED', 'FINISHED', 'ABANDONED');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type quiz_mode as enum ('mixed', 'facil', 'medio', 'dificil');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type user_role as enum ('player', 'admin');
+exception when duplicate_object then null; end $$;
+
+-- ============================================================================
+-- USERS
+-- ============================================================================
+create table if not exists public.users (
+  id            uuid primary key default gen_random_uuid(),
+  name          varchar(80)  not null,
+  nickname      citext       not null,
+  email         varchar(255),                 -- reservado p/ v1.2 (Supabase Auth)
+  auth_id       uuid,                          -- reservado p/ v1.2 (auth.users.id)
+  role          user_role    not null default 'player',
+  share_profile boolean      not null default true,
+  created_at    timestamptz  not null default now(),
+  last_seen_at  timestamptz  not null default now(),
+  updated_at    timestamptz  not null default now(),   -- usado pelo trigger trg_users_updated_at
+
+  constraint users_name_len      check (char_length(trim(name)) between 2 and 80),
+  constraint users_nickname_len  check (char_length(trim(nickname::text)) between 2 and 30),
+  constraint users_nickname_fmt  check (nickname::text ~ '^[A-Za-z0-9._\- ]+$'),
+  constraint users_email_fmt     check (email is null or email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$')
+);
+
+create unique index if not exists users_nickname_key on public.users (nickname);
+create unique index if not exists users_auth_id_key  on public.users (auth_id) where auth_id is not null;
+create index if not exists users_created_at_idx      on public.users (created_at desc);
+
+comment on table  public.users is 'Jogadores. v1.0: cadastro por nome/apelido. v1.2: email/auth_id passam a ser usados pelo Supabase Auth.';
+
+-- ============================================================================
+-- QUESTIONS
+-- ============================================================================
+create table if not exists public.questions (
+  id              uuid primary key default gen_random_uuid(),
+  book            varchar(24)  not null default 'todos', -- identificador do profeta
+  book_name       varchar(40)  not null default 'Todos os Profetas',
+  chapter         smallint     not null,
+  question        text         not null,
+  difficulty      question_difficulty not null,
+  option_a        text         not null,
+  option_b        text         not null,
+  option_c        text         not null,
+  option_d        text         not null,
+  correct_answer  answer_letter not null,
+  explanation     text         not null,
+  hint            text         not null,
+  source_type     varchar(16)  not null default 'texto_biblico',  -- texto_biblico | historico | interpretacao
+  order_index     integer      not null default 0,
+  active          boolean      not null default true,
+  created_at      timestamptz  not null default now(),
+  updated_at      timestamptz  not null default now(),
+
+  constraint questions_book_check check (book in ('oseias','joel','amos','obadias','jonas','miqueias','naum','habacuque','sofonias','ageu','zacarias','malaquias','todos')),
+  constraint questions_chapter_range check (chapter between 1 and 66),
+  constraint questions_text_len      check (char_length(question) between 10 and 600),
+  constraint questions_option_len    check (char_length(option_a) between 1 and 300
+                                          and char_length(option_b) between 1 and 300
+                                          and char_length(option_c) between 1 and 300
+                                          and char_length(option_d) between 1 and 300),
+  constraint questions_options_distinct check (
+        lower(trim(option_a)) <> lower(trim(option_b))
+    and lower(trim(option_a)) <> lower(trim(option_c))
+    and lower(trim(option_a)) <> lower(trim(option_d))
+    and lower(trim(option_b)) <> lower(trim(option_c))
+    and lower(trim(option_b)) <> lower(trim(option_d))
+    and lower(trim(option_c)) <> lower(trim(option_d))
+  ),
+  constraint questions_source_type check (source_type in ('texto_biblico','historico','interpretacao'))
+);
+
+alter table public.questions add column if not exists book_name varchar(40) not null default 'Todos os Profetas';
+
+create index if not exists questions_book_idx on public.questions (book, active);
+create index if not exists questions_difficulty_idx on public.questions (difficulty) where active;
+create index if not exists questions_active_idx     on public.questions (active, order_index);
+
+-- ============================================================================
+-- QUIZ_ATTEMPTS  (partida)
+-- ============================================================================
+create table if not exists public.quiz_attempts (
+  id               uuid primary key default gen_random_uuid(),
+  user_id          uuid not null references public.users(id) on delete cascade,
+  status           attempt_status not null default 'STARTED',
+  prophet          varchar(24) not null default 'todos',
+  mode             quiz_mode      not null default 'mixed',
+  difficulty       varchar(16)    not null default 'mixed',  -- redundância legível p/ ranking
+  score            integer not null default 0,
+  base_score       integer not null default 0,
+  bonus_score      integer not null default 0,
+  correct_answers  integer not null default 0,
+  wrong_answers    integer not null default 0,
+  total_questions  integer not null default 0,
+  answered_count   integer not null default 0,
+  percentage       numeric(5,2) not null default 0,
+  duration_seconds integer,                                  -- calculado no SERVIDOR
+  question_order   jsonb not null default '[]'::jsonb,        -- ordem sorteada (uuids)
+  started_at       timestamptz not null default now(),
+  finished_at      timestamptz,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+
+  -- PARTIDA IMUTÁVEL APÓS TERMINAR ---------------------------------------
+  constraint attempts_status_check      check (status in ('STARTED','FINISHED','ABANDONED')),
+  constraint attempts_score_nonneg      check (score >= 0 and base_score >= 0 and bonus_score >= 0),
+  constraint attempts_counts_nonneg     check (correct_answers >= 0 and wrong_answers >= 0
+                                               and answered_count >= 0 and total_questions >= 0),
+  constraint attempts_counts_consistent check (correct_answers + wrong_answers = answered_count
+                                               and answered_count <= total_questions),
+  constraint attempts_percentage_range  check (percentage >= 0 and percentage <= 100),
+  constraint attempts_finished_requires check (
+        (status = 'FINISHED' and finished_at is not null)
+     or (status <> 'FINISHED')
+  ),
+  constraint attempts_duration_nonneg   check (duration_seconds is null or duration_seconds >= 0)
+);
+
+alter table public.quiz_attempts add column if not exists prophet varchar(24) not null default 'todos';
+
+create index if not exists attempts_user_idx        on public.quiz_attempts (user_id, created_at desc);
+create index if not exists attempts_status_idx      on public.quiz_attempts (status);
+create index if not exists attempts_finished_idx    on public.quiz_attempts (score desc, percentage desc, correct_answers desc, finished_at desc)
+                                                     where status = 'FINISHED';
+create index if not exists attempts_created_at_idx  on public.quiz_attempts (created_at desc);
+
+-- ============================================================================
+-- QUIZ_ANSWERS  (resposta de cada questão dentro de uma partida)
+-- ============================================================================
+create table if not exists public.quiz_answers (
+  id              uuid primary key default gen_random_uuid(),
+  attempt_id      uuid not null references public.quiz_attempts(id) on delete cascade,
+  question_id     uuid not null references public.questions(id)      on delete restrict,
+  user_id         uuid not null references public.users(id)          on delete cascade,
+  selected_answer answer_letter not null,
+  is_correct      boolean not null,
+  points          integer not null default 0,
+  position        integer not null,                -- posição na ordem sorteada
+  time_spent_ms   integer not null default 0,
+  used_hint       boolean not null default false,
+  answered_at     timestamptz not null default now(),
+
+  -- SEM RESPOSTA DUPLICADA NA MESMA QUESTÃO ------------------------------
+  constraint answers_unique_per_question unique (attempt_id, question_id),
+  constraint answers_points_nonneg       check (points >= 0),
+  constraint answers_time_nonneg         check (time_spent_ms between 0 and 600000)
+);
+
+create index if not exists answers_attempt_idx  on public.quiz_answers (attempt_id, position);
+create index if not exists answers_question_idx on public.quiz_answers (question_id);
+create index if not exists answers_user_idx     on public.quiz_answers (user_id);
+
+-- ============================================================================
+-- ACHIEVEMENTS / USER_ACHIEVEMENTS  (conquistas)
+-- ============================================================================
+create table if not exists public.achievements (
+  id          uuid primary key default gen_random_uuid(),
+  code        varchar(40) not null unique,
+  name        varchar(80) not null,
+  description text        not null,
+  icon        varchar(16) not null default '🏅',
+  criteria    jsonb       not null default '{}'::jsonb,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.user_achievements (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        uuid not null references public.users(id)        on delete cascade,
+  achievement_id uuid not null references public.achievements(id) on delete cascade,
+  unlocked_at    timestamptz not null default now(),
+  attempt_id     uuid references public.quiz_attempts(id) on delete set null,
+
+  constraint user_achievements_unique unique (user_id, achievement_id)
+);
+
+create index if not exists user_achievements_user_idx on public.user_achievements (user_id, unlocked_at);
+
+-- ============================================================================
+-- ADMIN_TOKENS  (acesso à área /admin)
+-- ============================================================================
+create table if not exists public.admin_tokens (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.users(id) on delete cascade,
+  token_hash text not null unique,          -- sha256 do token
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  revoked_at timestamptz
+);
+create index if not exists admin_tokens_user_idx on public.admin_tokens (user_id);
+
+-- ============================================================================
+-- AUDIT_LOG  (trilha de auditoria anti-fraude)
+-- ============================================================================
+create table if not exists public.audit_log (
+  id         bigserial primary key,
+  user_id    uuid references public.users(id) on delete set null,
+  attempt_id uuid references public.quiz_attempts(id) on delete set null,
+  action     varchar(40) not null,
+  detail     jsonb not null default '{}'::jsonb,
+  ip         text,
+  created_at timestamptz not null default now()
+);
+create index if not exists audit_log_user_idx    on public.audit_log (user_id, created_at desc);
+create index if not exists audit_log_action_idx  on public.audit_log (action, created_at desc);
+
+-- ============================================================================
+-- TRIGGER: updated_at automático
+-- ============================================================================
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end $$;
+
+drop trigger if exists trg_users_updated_at on public.users;
+create trigger trg_users_updated_at before update on public.users
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_questions_updated_at on public.questions;
+create trigger trg_questions_updated_at before update on public.questions
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_attempts_updated_at on public.quiz_attempts;
+create trigger trg_attempts_updated_at before update on public.quiz_attempts
+  for each row execute function public.set_updated_at();
+
+-- ============================================================================
+-- TRIGGER: partida FINISHED/ABANDONED é IMUTÁVEL
+-- ============================================================================
+create or replace function public.protect_finished_attempt()
+returns trigger language plpgsql as $$
+begin
+  if old.status in ('FINISHED','ABANDONED') and (
+        new.status      is distinct from old.status      or
+        new.score       is distinct from old.score       or
+        new.base_score  is distinct from old.base_score  or
+        new.bonus_score is distinct from old.bonus_score or
+        new.correct_answers is distinct from old.correct_answers or
+        new.wrong_answers   is distinct from old.wrong_answers   or
+        new.percentage      is distinct from old.percentage      or
+        new.duration_seconds is distinct from old.duration_seconds or
+        new.answered_count   is distinct from old.answered_count
+     ) then
+    raise exception 'attempt % já está encerrado (status %) e não pode ser alterado', old.id, old.status
+      using errcode = '23505';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_attempts_immutable on public.quiz_attempts;
+create trigger trg_attempts_immutable before update on public.quiz_attempts
+  for each row execute function public.protect_finished_attempt();
+
+-- ============================================================================
+-- TRIGGER: respostas só entram em partida STARTED e na ordem sorteada
+-- ============================================================================
+create or replace function public.protect_answer_insert()
+returns trigger language plpgsql as $$
+declare
+  v_attempt public.quiz_attempts%rowtype;
+  v_expected uuid;
+begin
+  select * into v_attempt from public.quiz_attempts where id = new.attempt_id for update;
+  if not found then
+    raise exception 'partida inexistente';
+  end if;
+  if v_attempt.status <> 'STARTED' then
+    raise exception 'não é possível responder: partida com status %', v_attempt.status using errcode = '23505';
+  end if;
+  if new.user_id <> v_attempt.user_id then
+    raise exception 'resposta pertence a outro usuário' using errcode = '23505';
+  end if;
+  if v_attempt.total_questions > 0 and new.position <> (v_attempt.answered_count + 1) then
+    raise exception 'ordem de resposta inválida' using errcode = '23505';
+  end if;
+  v_expected := (v_attempt.question_order ->> (new.position - 1))::uuid;
+  if v_expected is not null and v_expected <> new.question_id then
+    raise exception 'questão fora da ordem sorteada da partida' using errcode = '23505';
+  end if;
+  if not exists (select 1 from public.questions q where q.id = new.question_id and q.active) then
+    raise exception 'questão inexistente ou inativa';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_answers_guard on public.quiz_answers;
+create trigger trg_answers_guard before insert on public.quiz_answers
+  for each row execute function public.protect_answer_insert();
+
+-- ============================================================================
+-- RPC: leaderboard (ranking) — calculado 100% no banco
+--   p_period: 'all' | 'today' | 'week' | 'month'
+--   p_mode:   'mixed' | 'facil' | 'medio' | 'dificil' | 'all'
+--   Critério: 1) maior pontuação 2) maior percentual 3) mais acertos 4) resultado mais recente
+-- ============================================================================
+create or replace function public.leaderboard(
+  p_period text default 'all',
+  p_mode   text default 'all',
+  p_limit  integer default 100,
+  p_offset integer default 0
+)
+returns table (
+  rank             bigint,
+  user_id          uuid,
+  name             varchar,
+  nickname         text,
+  best_score       integer,
+  best_percentage  numeric,
+  best_correct     integer,
+  best_total       integer,
+  attempts_count   bigint,
+  total_correct    bigint,
+  last_played_at   timestamptz
+)
+language sql stable as $$
+  with filtered as (
+    select a.*
+    from public.quiz_attempts a
+    where a.status = 'FINISHED'
+      and a.total_questions > 0
+      and (
+            p_period = 'all'
+         or (p_period = 'today' and a.finished_at >= date_trunc('day', now()))
+         or (p_period = 'week'  and a.finished_at >= date_trunc('week', now()))
+         or (p_period = 'month' and a.finished_at >= date_trunc('month', now()))
+      )
+      and (p_mode = 'all' or a.mode = p_mode::public.quiz_mode)
+  ),
+  best as (
+    select distinct on (f.user_id)
+           f.user_id, f.score, f.percentage, f.correct_answers, f.total_questions, f.finished_at
+    from filtered f
+    order by f.user_id, f.score desc, f.percentage desc, f.correct_answers desc, f.finished_at desc
+  ),
+  agg as (
+    select f.user_id,
+           count(*)              as attempts_count,
+           coalesce(sum(f.correct_answers), 0) as total_correct,
+           max(f.finished_at)    as last_played_at
+    from filtered f
+    group by f.user_id
+  )
+  select row_number() over (
+           order by b.score desc, b.percentage desc, b.correct_answers desc, b.finished_at desc
+         )                                   as rank,
+         b.user_id,
+         u.name,
+         u.nickname::text                    as nickname,
+         b.score                             as best_score,
+         b.percentage                        as best_percentage,
+         b.correct_answers                   as best_correct,
+         b.total_questions                   as best_total,
+         a.attempts_count,
+         a.total_correct,
+         a.last_played_at
+  from best b
+  join public.users u on u.id = b.user_id
+  join agg a          on a.user_id = b.user_id
+  where u.share_profile = true
+  order by b.score desc, b.percentage desc, b.correct_answers desc, b.finished_at desc
+  limit greatest(1, least(p_limit, 200)) offset greatest(0, p_offset);
+$$;
+
+-- ============================================================================
+-- RPC: posição de um jogador + percentual superado
+-- ============================================================================
+create or replace function public.player_rank(p_user uuid, p_period text default 'all', p_mode text default 'all')
+returns table (rank bigint, total_players bigint, beaten_percentage numeric)
+language sql stable as $$
+  with lb as (select * from public.leaderboard(p_period, p_mode, 200, 0)),
+       me as (select * from lb where lb.user_id = p_user)
+  select coalesce(me.rank, 0)::bigint                       as rank,
+         (select count(*) from lb)::bigint                  as total_players,
+         case
+           when me.rank is null then 0
+           when (select count(*) from lb) <= 1 then 100
+           else round(100.0 * ((select count(*) from lb) - me.rank) / ((select count(*) from lb) - 1), 1)
+         end                                                as beaten_percentage
+  from me
+  union all
+  select 0, (select count(*) from public.leaderboard(p_period, p_mode, 200, 0)), 0
+  where not exists (select 1 from me);
+$$;
+
+-- ============================================================================
+-- RPC: estatísticas gerais do dashboard
+-- ============================================================================
+create or replace function public.global_stats()
+returns jsonb language sql stable as $$
+  select jsonb_build_object(
+    'total_players',        (select count(*) from public.users),
+    'total_attempts',       (select count(*) from public.quiz_attempts where status = 'FINISHED'),
+    'total_answers',        (select count(*) from public.quiz_answers),
+    'total_questions',      (select count(*) from public.questions where active),
+    'best_score',           (select coalesce(max(score), 0) from public.quiz_attempts where status = 'FINISHED'),
+    'best_percentage',      (select coalesce(max(percentage), 0) from public.quiz_attempts where status = 'FINISHED'),
+    'avg_score',            (select coalesce(round(avg(score)), 0) from public.quiz_attempts where status = 'FINISHED'),
+    'avg_correct',          (select coalesce(round(avg(correct_answers)::numeric, 1), 0) from public.quiz_attempts where status = 'FINISHED'),
+    'avg_percentage',       (select coalesce(round(avg(percentage), 1), 0) from public.quiz_attempts where status = 'FINISHED'),
+    'most_correct_question', (
+        select coalesce(jsonb_agg(jsonb_build_object(
+                 'question_id', q.id, 'text', q.question, 'correct', s.correct, 'wrong', s.wrong,
+                 'accuracy', round(100.0 * s.correct / nullif(s.correct + s.wrong, 0), 1))
+               order by (s.correct::numeric / nullif(s.correct + s.wrong, 0)) desc nulls last)
+               filter (where rn <= 5), '[]'::jsonb)
+        from (
+          select qa.question_id,
+                 count(*) filter (where qa.is_correct)     as correct,
+                 count(*) filter (where not qa.is_correct) as wrong,
+                 row_number() over (order by (count(*) filter (where qa.is_correct))::numeric
+                                      / nullif(count(*), 0) desc) as rn
+          from public.quiz_answers qa group by qa.question_id
+        ) s join public.questions q on q.id = s.question_id
+    ),
+    'most_wrong_question', (
+        select coalesce(jsonb_agg(jsonb_build_object(
+                 'question_id', q.id, 'text', q.question, 'correct', s.correct, 'wrong', s.wrong,
+                 'accuracy', round(100.0 * s.correct / nullif(s.correct + s.wrong, 0), 1))
+               order by (s.wrong::numeric / nullif(s.correct + s.wrong, 0)) desc nulls last)
+               filter (where rn <= 5), '[]'::jsonb)
+        from (
+          select qa.question_id,
+                 count(*) filter (where qa.is_correct)     as correct,
+                 count(*) filter (where not qa.is_correct) as wrong,
+                 row_number() over (order by (count(*) filter (where not qa.is_correct))::numeric
+                                      / nullif(count(*), 0) desc) as rn
+          from public.quiz_answers qa group by qa.question_id
+        ) s join public.questions q on q.id = s.question_id
+    )
+  );
+$$;
+
+-- ============================================================================
+-- RPC: estatísticas de um jogador (perfil + gráfico de evolução)
+-- ============================================================================
+create or replace function public.player_stats(p_user uuid)
+returns jsonb language sql stable as $$
+  select jsonb_build_object(
+    'attempts',        (select count(*) from public.quiz_attempts a where a.user_id = p_user and a.status = 'FINISHED'),
+    'total_correct',   (select coalesce(sum(correct_answers),0) from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'total_wrong',     (select coalesce(sum(wrong_answers),0)   from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'best_score',      (select coalesce(max(score),0)           from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'best_percentage', (select coalesce(max(percentage),0)      from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'avg_score',       (select coalesce(round(avg(score)),0)    from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'avg_correct',     (select coalesce(round(avg(correct_answers)::numeric,1),0) from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'total_duration',  (select coalesce(sum(duration_seconds),0) from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'last_attempt_at', (select max(finished_at) from public.quiz_attempts a where a.user_id = p_user and a.status='FINISHED'),
+    'evolution', (
+        select coalesce(jsonb_agg(jsonb_build_object(
+                 'date', to_char(a.finished_at, 'DD/MM/YYYY'),
+                 'score', a.score, 'percentage', a.percentage, 'correct', a.correct_answers,
+                 'total', a.total_questions) order by a.finished_at asc), '[]'::jsonb)
+        from (select * from public.quiz_attempts
+              where user_id = p_user and status = 'FINISHED'
+              order by finished_at desc limit 30) a
+    )
+  );
+$$;
+
+-- ============================================================================
+-- GRANTS (o backend usa a service_role key; o frontend NUNCA acessa o banco)
+-- ============================================================================
+grant usage on schema public to anon, authenticated;
+grant select on public.questions to anon, authenticated;
+revoke insert, update, delete on all tables in schema public from anon, authenticated;
+grant all on all tables in schema public to service_role;
+
+-- Quiz dos Profetas Menores: 60 perguntas, 5 por profeta.
+insert into public.questions
+(book,book_name,chapter,question,difficulty,option_a,option_b,option_c,option_d,correct_answer,explanation,hint,source_type,order_index) values
+('oseias','Oséias',1,'Qual é o nome do profeta que recebeu de Deus a ordem de se casar com uma mulher de prostituição?','facil','Oséias','Joel','Amós','Miquéias','A','Oséias 1:2 identifica o próprio profeta como aquele que recebeu essa ordem.','O nome do livro é também o nome do profeta.','texto_biblico',1),
+('oseias','Oséias',11,'Em Oséias 11, como Deus descreve seu relacionamento com Israel?','facil','Como um comerciante','Como um pai que ensinou seu filho a andar','Como um rei estrangeiro','Como um guerreiro derrotado','B','Oséias 11:1-3 usa a imagem de Deus ensinando Efraim a andar e tomando-o nos braços.','A imagem é de cuidado paternal.','texto_biblico',2),
+('oseias','Oséias',6,'O que Oséias 6:6 diz que Deus deseja mais do que sacrifícios?','medio','Riquezas','Conhecimento de Deus','Vitórias militares','Construções','B','Oséias 6:6 afirma que Deus deseja misericórdia e conhecimento de Deus mais do que holocaustos e sacrifícios.','A resposta envolve conhecer a Deus.','texto_biblico',3),
+('oseias','Oséias',14,'Qual é o convite final do livro de Oséias?','medio','Fugir para o Egito','Voltar ao Senhor','Construir um novo templo','Escolher um novo rei','B','Oséias 14:1 chama Israel a voltar ao Senhor, pois tropeçou em sua iniquidade.','O capítulo final começa com um chamado de retorno.','texto_biblico',4),
+('oseias','Oséias',2,'No simbolismo de Oséias 2, o que representa a infidelidade de Israel?','dificil','A idolatria e a ruptura da aliança com Deus','A construção do templo','A invasão da Assíria apenas','A divisão das tribos no deserto','A','Oséias usa a imagem conjugal para denunciar a infidelidade espiritual de Israel, associada à idolatria.','A metáfora central é a de um casamento rompido.','texto_biblico',5),
+('joel','Joel',1,'Qual desastre ocupa grande parte do capítulo 1 de Joel?','facil','Uma enchente','Uma invasão de gafanhotos','Um terremoto','Uma seca no Egito','B','Joel 1 descreve uma devastação causada por gafanhotos e convoca o povo ao lamento e ao jejum.','O desastre é descrito como uma praga de insetos.','texto_biblico',6),
+('joel','Joel',2,'O que Deus promete derramar sobre toda carne em Joel 2?','facil','O seu Espírito','O seu ouro','A sua espada','O seu templo','A','Joel 2:28 anuncia: Deus derramará o seu Espírito sobre toda carne.','É a promessa associada a filhos e filhas profetizando.','texto_biblico',7),
+('joel','Joel',2,'Qual atitude Joel 2:12-13 pede ao povo?','medio','Voltar ao Senhor de todo o coração','Migrar para outra terra','Construir uma fortaleza','Parar de orar','A','Joel chama o povo a voltar ao Senhor com jejum, choro e pranto, rasgando o coração.','O chamado é interior, não apenas externo.','texto_biblico',8),
+('joel','Joel',3,'Segundo Joel 3, onde as nações são reunidas para julgamento?','medio','Vale de Josafá','Monte Carmelo','Vale de Elá','Deserto do Sinai','A','Joel 3:2 e 12 menciona o vale de Josafá como lugar do julgamento das nações.','O nome significa associado ao julgamento do Senhor.','texto_biblico',9),
+('joel','Joel',2,'Qual fenômeno é citado junto à promessa do Espírito e aos sinais no céu?','dificil','O sol se converterá em trevas e a lua em sangue','O mar se tornará doce','As montanhas desaparecerão','A chuva cessará por quarenta anos','A','Joel 2:30-31 menciona sinais no céu, incluindo sol em trevas e lua em sangue antes do grande e terrível dia do Senhor.','São sinais celestes.','texto_biblico',10),
+('amos','Amós',1,'Qual era a profissão de Amós antes de exercer seu ministério profético?','facil','Pastor de ovelhas e cultivador de sicômoros','Sacerdote','Rei','Pescador','A','Amós 1:1 e 7:14 apresentam Amós como pastor e cultivador de sicômoros.','Ele não se apresenta como membro de uma escola profética.','texto_biblico',11),
+('amos','Amós',5,'O que Amós 5:24 diz que deve correr como um rio?','facil','O ouro','A justiça','O vinho','A guerra','B','Amós 5:24 compara a justiça a águas e o juízo à correnteza de um ribeiro perene.','É uma das imagens mais conhecidas do livro.','texto_biblico',12),
+('amos','Amós',3,'Qual princípio Amós 3:3 apresenta?','medio','Dois andarão juntos se não houver acordo entre eles','Todo rei é justo','Israel nunca será julgado','Profetas não precisam ouvir Deus','A','Amós 3:3 pergunta se duas pessoas podem andar juntas sem estarem de acordo.','É uma pergunta sobre concordância e caminhada conjunta.','texto_biblico',13),
+('amos','Amós',7,'O que Amós vê em uma das primeiras visões do capítulo 7?','medio','Um cesto de frutas de verão','Uma arca','Um carro de fogo','Uma escada','A','Amós 8:1-2 registra a visão de um cesto de frutas de verão, símbolo da proximidade do fim de Israel.','A visão está no capítulo 8.','texto_biblico',14),
+('amos','Amós',8,'Na visão do cesto de frutas de verão, qual jogo de palavras aparece?','dificil','Fruta de verão e fim chegou','Chuva e bênção','Rei e sacerdote','Templo e altar','A','Amós 8:2 usa um jogo de palavras em hebraico entre fruta de verão e fim, indicando o fim de Israel.','A visão anuncia que o fim chegou.','texto_biblico',15),
+('obadias','Obadias',1,'Qual nação é o principal alvo da profecia de Obadias?','facil','Edom','Egito','Assíria','Moabe','A','Obadias é uma profecia contra Edom.','Edom é o povo descendente de Esaú.','texto_biblico',16),
+('obadias','Obadias',1,'Edom é associado a qual ancestral?','facil','Jacó','Esaú','Isaque','José','B','Edom está ligado a Esaú, irmão de Jacó, conforme Gênesis.','Esaú recebeu o nome Edom.','texto_biblico',17),
+('obadias','Obadias',1,'Por que Edom é condenado em Obadias?','medio','Por sua violência contra seu irmão Jacó','Por construir o templo','Por abandonar o Egito','Por cultivar oliveiras','A','Obadias 10-14 condena a violência e a participação de Edom na desgraça de Judá.','O texto fala de violência contra o irmão.','texto_biblico',18),
+('obadias','Obadias',1,'O que Obadias 17 promete que haverá no monte Sião?','medio','Livramento e santidade','Uma grande frota','Uma nova pirâmide','Um exército estrangeiro','A','Obadias 17 afirma que no monte Sião haverá livramento e ele será santo.','É uma promessa para Sião.','texto_biblico',19),
+('obadias','Obadias',1,'Qual é a ideia central do final de Obadias sobre o reino?','dificil','O reino será do Senhor','Edom governará para sempre','Babilônia dominará Judá','Não haverá restauração','A','Obadias 21 termina com a declaração de que o reino será do Senhor.','É a frase final do livro.','texto_biblico',20),
+('jonas','Jonas',1,'Para qual cidade Jonas foi enviado para pregar?','facil','Nínive','Jerusalém','Samaria','Babilônia','A','Jonas 1:2 ordena que o profeta vá a Nínive para anunciar sua mensagem.','Era a grande cidade da Assíria.','texto_biblico',21),
+('jonas','Jonas',2,'O que engoliu Jonas depois que ele foi lançado ao mar?','facil','Um grande peixe','Um crocodilo','Uma baleia mencionada pelo nome','Um navio','A','Jonas 1:17 diz que o Senhor preparou um grande peixe para engolir Jonas.','O texto chama de grande peixe.','texto_biblico',22),
+('jonas','Jonas',3,'Como os ninivitas reagiram à pregação de Jonas?','medio','Arrependeram-se e proclamaram jejum','Ignoraram a mensagem','Prenderam Jonas','Foram para Jerusalém','A','Jonas 3 descreve arrependimento, jejum e clamor a Deus desde o povo até o rei.','O rei também participou do jejum.','texto_biblico',23),
+('jonas','Jonas',4,'Por que Jonas ficou descontente depois da misericórdia de Deus para Nínive?','medio','Porque Deus não destruiu a cidade','Porque perdeu o barco','Porque não recebeu pagamento','Porque o peixe voltou','A','Jonas 4:1-2 mostra que Jonas ficou irado porque Deus teve misericórdia e não executou o juízo anunciado.','Jonas já sabia que Deus era misericordioso.','texto_biblico',24),
+('jonas','Jonas',4,'Que planta Deus fez crescer para dar sombra a Jonas?','dificil','Uma videira','Um mamoeiro','Uma planta chamada mamona na tradição portuguesa','Uma figueira','C','Jonas 4:6 fala de uma planta que cresceu para fazer sombra; traduções portuguesas variam na identificação, frequentemente usando mamona ou planta de rícino.','O texto enfatiza que Deus preparou a planta e depois a fez secar.','texto_biblico',25),
+('miqueias','Miquéias',1,'De onde era Miquéias?','facil','Moresete','Belém','Jericó','Tiro','A','Miquéias 1:1 identifica o profeta como morastita, isto é, de Moresete.','O nome do lugar aparece no início do livro.','texto_biblico',26),
+('miqueias','Miquéias',5,'Qual cidade é mencionada como origem do governante prometido?','facil','Jerusalém','Belém Efrata','Nínive','Hebrom','B','Miquéias 5:2 menciona Belém Efrata como pequena entre os clãs de Judá.','É uma cidade pequena de Judá.','texto_biblico',27),
+('miqueias','Miquéias',6,'Segundo Miquéias 6:8, o que o Senhor requer do ser humano?','medio','Praticar a justiça, amar a misericórdia e andar humildemente com Deus','Construir grandes palácios','Oferecer milhares de cavalos','Conquistar outras nações','A','Miquéias 6:8 resume o chamado ético em justiça, misericórdia e humildade diante de Deus.','São três verbos/ideias centrais.','texto_biblico',28),
+('miqueias','Miquéias',4,'O que Miquéias 4:3 diz que as nações transformarão?','medio','Espadas em arados e lanças em foices','Arados em espadas','Templos em palácios','Rios em estradas','A','Miquéias 4:3 descreve a transformação de armas de guerra em instrumentos agrícolas.','A imagem é de paz e cultivo.','texto_biblico',29),
+('miqueias','Miquéias',3,'Qual crítica Miquéias faz aos líderes que deveriam conhecer a justiça?','dificil','Eles aborreciam o bem e amavam o mal','Eles abandonaram a agricultura','Eles reconstruíram Nínive','Eles serviam como sacerdotes fiéis','A','Miquéias 3:1-3 acusa chefes e líderes de odiar o direito e praticar violência contra o povo.','A crítica é dirigida aos líderes de Israel.','texto_biblico',30),
+('naum','Naum',1,'Contra qual cidade é dirigida a profecia de Naum?','facil','Nínive','Jerusalém','Tiro','Damasco','A','Naum 1:1 apresenta a sentença contra Nínive.','É a capital assíria.','texto_biblico',31),
+('naum','Naum',1,'Como Naum descreve o Senhor em relação à ira?','facil','Tardio em irar-se e grande em poder','Fraco e indeciso','Sempre irado sem misericórdia','Indiferente ao mal','A','Naum 1:3 afirma que o Senhor é tardio em irar-se e grande em poder, sem deixar impune o culpado.','O verso combina paciência e justiça.','texto_biblico',32),
+('naum','Naum',2,'Qual imagem aparece na descrição da queda de Nínive?','medio','Carros correndo pelas ruas e portas dos rios abertas','Um templo sendo reconstruído','Um exército chegando de Jerusalém','Uma seca no deserto','A','Naum 2 descreve de forma poética o ataque e a queda de Nínive, incluindo carros e a abertura das portas dos rios.','A cidade está sob ataque.','texto_biblico',33),
+('naum','Naum',3,'Por que Nínive é chamada de cidade sanguinária?','medio','Por sua violência, mentira e exploração','Por seus muitos jardins','Por sua riqueza agrícola','Por ser pequena','A','Naum 3:1 acusa Nínive de sangue, mentira, roubo e violência.','A expressão aparece no início do capítulo 3.','texto_biblico',34),
+('naum','Naum',3,'Qual é o destino anunciado para Nínive?','dificil','Ser destruída e não ter cura para sua ferida','Ser reconstruída como capital de Judá','Governar o Egito','Receber um novo templo','A','Naum 3:7-19 descreve a queda de Nínive como irreversível diante das nações.','O final do livro não anuncia restauração de Nínive.','texto_biblico',35),
+('habacuque','Habacuque',1,'O que Habacuque faz principalmente no início do livro?','facil','Questiona a Deus sobre a violência e a injustiça','Constrói um altar','Foge para o Egito','Interpreta sonhos de Nabucodonosor','A','Habacuque começa apresentando perguntas e queixas sobre a violência e a aparente demora da justiça.','O livro tem forma de diálogo entre profeta e Deus.','texto_biblico',36),
+('habacuque','Habacuque',2,'Qual frase famosa aparece em Habacuque 2:4?','facil','O justo viverá pela sua fé','O Senhor é meu pastor','Olho por olho','Tudo é vaidade','A','Habacuque 2:4 afirma: o justo viverá pela sua fé/fidelidade, conforme a tradução.','É uma frase central do livro.','texto_biblico',37),
+('habacuque','Habacuque',2,'O que Deus manda Habacuque fazer com a visão?','medio','Escrevê-la claramente em tábuas','Escondê-la','Apagá-la','Entregá-la ao rei do Egito','A','Habacuque 2:2 ordena que a visão seja escrita claramente em tábuas para que possa ser lida.','A instrução é escrever a visão.','texto_biblico',38),
+('habacuque','Habacuque',3,'Apesar da crise, como termina a oração de Habacuque?','medio','Com alegria e confiança em Deus','Com uma fuga','Com uma coroação','Com silêncio absoluto','A','Habacuque 3:17-19 reconhece a falta de frutos e rebanhos, mas afirma alegria no Senhor e confiança em Deus.','A alegria não depende da prosperidade.','texto_biblico',39),
+('habacuque','Habacuque',1,'Qual povo Deus diz que levantará como instrumento de juízo?','dificil','Os caldeus','Os filisteus','Os egípcios','Os edomitas','A','Habacuque 1:6 identifica os caldeus como povo que Deus levantaria para executar juízo.','Caldeus é uma designação associada aos babilônios.','texto_biblico',40),
+('sofonias','Sofonias',1,'Quem é identificado como pai de Sofonias?','facil','Cusi','Amós','Hulda','Ezequias','A','Sofonias 1:1 começa com a genealogia e identifica Sofonias como filho de Cusi.','O nome aparece no primeiro versículo.','texto_biblico',41),
+('sofonias','Sofonias',1,'Qual expressão marca o anúncio de juízo em Sofonias?','facil','O dia do Senhor','O ano do jubileu','A festa das colheitas','A noite do rei','A','O livro repete a expressão dia do Senhor como momento de juízo.','É o tema temporal mais destacado.','texto_biblico',42),
+('sofonias','Sofonias',2,'O que Sofonias 2:3 recomenda buscar?','medio','O Senhor, a justiça e a humildade','Riquezas e poder','A Assíria','Um novo palácio','A','Sofonias 2:3 chama os humildes da terra a buscar o Senhor, a justiça e a humildade.','São três elementos no convite.','texto_biblico',43),
+('sofonias','Sofonias',3,'Como termina o livro de Sofonias?','medio','Com promessa de restauração e alegria de Deus sobre seu povo','Com a queda de Jerusalém sem esperança','Com uma guerra no Egito','Com a morte do profeta','A','Sofonias 3:14-20 termina com restauração, reunião dos dispersos e alegria associada à presença de Deus no meio do povo.','O final muda do juízo para a restauração.','texto_biblico',44),
+('sofonias','Sofonias',3,'Qual cidade é mencionada entre os alvos de juízo no livro?','dificil','Nínive','Belém','Hebrom','Damasco','A','Sofonias 2:13-15 anuncia juízo contra a Assíria e Nínive, descrita como cidade desolada.','A cidade assíria aparece explicitamente no capítulo 2.','texto_biblico',45),
+('ageu','Ageu',1,'Qual obra Ageu incentiva o povo a retomar?','facil','A reconstrução do templo','A construção de uma frota','A muralha de Jericó','O palácio do rei','A','Ageu 1:8 chama o povo a subir ao monte, trazer madeira e edificar a casa de Deus.','O templo é chamado de casa do Senhor.','texto_biblico',46),
+('ageu','Ageu',1,'Quem governava Judá como governador no contexto de Ageu?','facil','Zorobabel','Elias','Ezequias','Saul','A','Ageu 1:1 identifica Zorobabel, filho de Sealtiel, como governador de Judá.','Ele aparece ao lado de Josué, o sumo sacerdote.','texto_biblico',47),
+('ageu','Ageu',1,'Quem era o sumo sacerdote mencionado junto a Zorobabel?','medio','Josué, filho de Jeozadaque','Arão','Eli','Zadoque','A','Ageu 1:1 e outros textos do livro mencionam Josué, filho de Jeozadaque, como sumo sacerdote.','Não é Josué, sucessor de Moisés.','texto_biblico',48),
+('ageu','Ageu',2,'O que Deus promete em Ageu 2:9 sobre a glória da casa?','medio','A glória desta última casa seria maior que a da primeira','A casa seria abandonada','O templo seria transferido para o Egito','Não haveria templo','A','Ageu 2:9 promete que a glória desta última casa seria maior que a primeira e anuncia paz.','A comparação é entre a casa anterior e a reconstruída.','texto_biblico',49),
+('ageu','Ageu',2,'Qual imagem política aparece em Ageu 2:22?','dificil','Tronos serão derrubados e reinos serão destruídos','Israel dominará o Egito imediatamente','A Assíria voltará a governar','Zorobabel será coroado rei de todas as nações','A','Ageu 2:22 fala em derrubar tronos e destruir forças de reinos, dentro da mensagem escatológica do profeta.','A linguagem é de abalo dos poderes políticos.','texto_biblico',50),
+('zacarias','Zacarias',1,'Qual era a principal mensagem inicial de Zacarias 1:3?','facil','Voltai para mim, e eu me voltarei para vós','Fugi para o Egito','Não construam o templo','Escolham outro rei','A','Zacarias 1:3 chama o povo a retornar ao Senhor e promete que o Senhor se voltará para eles.','É um chamado ao retorno.','texto_biblico',51),
+('zacarias','Zacarias',5,'O que Zacarias vê em uma das visões do capítulo 5?','facil','Um rolo voante','Uma arca de Noé','Um peixe gigante','Uma coroa de ferro','A','Zacarias 5:1 descreve um rolo voante.','É uma visão escrita e voadora.','texto_biblico',52),
+('zacarias','Zacarias',4,'Na visão do capítulo 4, o que representa o azeite em relação às duas oliveiras?','medio','A provisão do Espírito de Deus','A riqueza do rei','A força militar','A água do templo','A','Zacarias 4 enfatiza a ação do Espírito: não por força nem por poder, mas pelo Espírito do Senhor.','O verso 6 fornece a chave da visão.','texto_biblico',53),
+('zacarias','Zacarias',9,'Qual rei é descrito chegando a Jerusalém montado em um jumento?','medio','Um rei justo e salvador','O rei da Assíria','O faraó do Egito','Nabucodonosor','A','Zacarias 9:9 descreve um rei justo, salvador e humilde, montado em jumento.','A descrição é de um rei humilde.','texto_biblico',54),
+('zacarias','Zacarias',12,'Qual expressão aparece em Zacarias 12:10 sobre o futuro arrependimento?','dificil','Olharão para aquele a quem traspassaram e prantearão','Não haverá arrependimento','Israel será levado ao Egito','Jerusalém será abandonada para sempre','A','Zacarias 12:10 descreve derramamento de espírito de graça e súplicas, seguido de lamento ao olhar para aquele que foi traspassado.','É uma passagem de lamento e arrependimento.','texto_biblico',55),
+('malaquias','Malaquias',1,'Qual é a primeira pergunta de contestação registrada no diálogo de Malaquias?','facil','Em que nos amaste?','Onde está Moisés?','Quem é o rei?','Quando virá Elias?','A','Malaquias 1:2 registra a pergunta do povo: em que nos amaste?','Ela vem logo após Deus declarar seu amor por Jacó.','texto_biblico',56),
+('malaquias','Malaquias',3,'Quem é prometido como mensageiro antes da chegada do Senhor?','facil','Um mensageiro que prepararia o caminho','Um general romano','Um novo rei assírio','Um sacerdote de Samaria','A','Malaquias 3:1 fala do mensageiro que preparará o caminho diante do Senhor.','A palavra-chave é mensageiro.','texto_biblico',57),
+('malaquias','Malaquias',3,'O que Malaquias 3:10 relaciona ao dízimo?','medio','Trazer todos os dízimos à casa do tesouro','Guardar o dízimo em casa','Entregar somente ao rei','Usar o dízimo para guerra','A','Malaquias 3:10 chama a trazer todos os dízimos à casa do tesouro e apresenta a promessa de provisão.','A expressão é casa do tesouro.','texto_biblico',58),
+('malaquias','Malaquias',4,'O que o final do livro de Malaquias promete enviar antes do grande e terrível dia do Senhor?','medio','Elias, o profeta','Samuel','Jeremias','Natã','A','Malaquias 4:5 promete enviar Elias, o profeta, antes do grande e terrível dia do Senhor.','É o último nome mencionado no livro.','texto_biblico',59),
+('malaquias','Malaquias',2,'Qual problema dos sacerdotes é denunciado em Malaquias 2?','dificil','Desprezavam o nome de Deus e ofereciam sacrifícios inadequados','Construíam muitos altares','Recusavam-se a trabalhar no templo','Não conheciam a Lei de Moisés','A','Malaquias 1–2 denuncia sacerdotes que desprezavam o nome de Deus e aceitavam animais inadequados para sacrifício.','A denúncia envolve a qualidade das ofertas.','texto_biblico',60)
+on conflict do nothing;
+
+insert into public.achievements (code,name,description,icon,criteria) values
+('FIRST_GAME','Primeira Partida','Complete sua primeira partida.','🎯','{"type":"attempts_count","value":1}'::jsonb),
+('FIVE_GAMES','5 Partidas','Complete 5 partidas.','🔥','{"type":"attempts_count","value":5}'::jsonb),
+('TEN_GAMES','10 Partidas','Complete 10 partidas.','⚡','{"type":"attempts_count","value":10}'::jsonb),
+('PERFECT_SCORE','100% de Acertos','Termine uma partida com todas as respostas corretas.','💯','{"type":"perfect_attempt","value":true}'::jsonb),
+('TOP_TEN','Top 10','Entre no top 10 do ranking geral.','🏅','{"type":"leaderboard_position","value":10}'::jsonb),
+('FIRST_PLACE','1º Lugar','Alcance o 1º lugar do ranking geral.','👑','{"type":"leaderboard_position","value":1}'::jsonb),
+('PROPHETS_EXPERT','Especialista nos Profetas','Acumule 100 respostas corretas e alcance 85% ou mais de acerto.','📖','{"type":"expert","correct":100,"min_accuracy":85}'::jsonb)
+on conflict (code) do nothing;
+
+-- ============================================================================
+--  QUIZ BÍBLICO — PROFETAS MENORES · rls.sql
+--  Row Level Security (defesa em profundidade)
+-- ----------------------------------------------------------------------------
+--  MODELO DE SEGURANÇA DA v1.0
+--  • O frontend (navegador) usa SOMENTE a `anon key` do Supabase e NÃO acessa
+--    diretamente as tabelas de jogo: todas as operações passam pela API.
+--  • O backend usa a `service_role key`, que ignora RLS (fica apenas no servidor).
+--  • Ainda assim, o RLS é habilitado em TODAS as tabelas e as policies abaixo
+--    liberam apenas leituras públicas, bloqueando qualquer escrita anônima.
+--    Resultado: mesmo que a anon key vaze, ninguém consegue alterar pontuação.
+-- ============================================================================
+
+alter table public.users             enable row level security;
+alter table public.questions         enable row level security;
+alter table public.quiz_attempts     enable row level security;
+alter table public.quiz_answers      enable row level security;
+alter table public.achievements      enable row level security;
+alter table public.user_achievements enable row level security;
+alter table public.admin_tokens      enable row level security;
+alter table public.audit_log         enable row level security;
+
+-- Limpa policies antigas (idempotente) ---------------------------------------
+do $$
+declare t text; p record;
+begin
+  foreach t in array array['users','questions','quiz_attempts','quiz_answers',
+                           'achievements','user_achievements','admin_tokens','audit_log']
+  loop
+    for p in select policyname from pg_policies where schemaname='public' and tablename=t loop
+      execute format('drop policy if exists %I on public.%I', p.policyname, t);
+    end loop;
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- QUESTIONS: leitura pública das questões ATIVAS, sem o gabarito.
+-- (A coluna correct_answer/explanation nunca é devolvida pelo backend antes da
+--  resposta; o SELECT abaixo ainda aplica um filtro extra por segurança.)
+-- ---------------------------------------------------------------------------
+create policy questions_select_public on public.questions
+  for select to anon, authenticated
+  using (active = true);
+
+-- Nenhuma policy de insert/update/delete => escrita anônima bloqueada.
+
+-- ---------------------------------------------------------------------------
+-- USERS: leitura pública apenas dos campos exibidos no ranking/perfil.
+-- ---------------------------------------------------------------------------
+create policy users_select_public on public.users
+  for select to anon, authenticated
+  using (share_profile = true);
+
+-- ---------------------------------------------------------------------------
+-- ACHIEVEMENTS: catálogo público.
+-- ---------------------------------------------------------------------------
+create policy achievements_select_public on public.achievements
+  for select to anon, authenticated using (true);
+
+-- ---------------------------------------------------------------------------
+-- USER_ACHIEVEMENTS: leitura pública (conquistas de quem compartilha perfil).
+-- ---------------------------------------------------------------------------
+create policy user_achievements_select_public on public.user_achievements
+  for select to anon, authenticated
+  using (exists (select 1 from public.users u where u.id = user_id and u.share_profile = true));
+
+-- ---------------------------------------------------------------------------
+-- QUIZ_ATTEMPTS: apenas partidas FINALIZADAS de quem compartilha o perfil.
+-- Partidas STARTED/ABANDONED nunca são públicas (anti-fraude).
+-- ---------------------------------------------------------------------------
+create policy attempts_select_public on public.quiz_attempts
+  for select to anon, authenticated
+  using (
+    status = 'FINISHED'
+    and exists (select 1 from public.users u where u.id = user_id and u.share_profile = true)
+  );
+
+-- ---------------------------------------------------------------------------
+-- QUIZ_ANSWERS: respostas públicas somente de partidas FINALIZADAS.
+-- ---------------------------------------------------------------------------
+create policy answers_select_public on public.quiz_answers
+  for select to anon, authenticated
+  using (
+    exists (
+      select 1 from public.quiz_attempts a
+      where a.id = attempt_id and a.status = 'FINISHED'
+        and exists (select 1 from public.users u where u.id = a.user_id and u.share_profile = true)
+    )
+  );
+
+-- ---------------------------------------------------------------------------
+-- ADMIN_TOKENS e AUDIT_LOG: nunca acessíveis por anon/authenticated.
+-- (RLS ligado + nenhuma policy = bloqueio total. Só a service_role acessa.)
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- v1.2 — Supabase Auth (estrutura já preparada)
+-- Quando o login por e-mail/Google for ativado, adicione:
+--
+--   alter table public.users add column auth_id uuid references auth.users(id);
+--   create policy users_self_update on public.users
+--     for update to authenticated using (auth.uid() = auth_id) with check (auth.uid() = auth_id);
+--   create policy attempts_self_select on public.quiz_attempts
+--     for select to authenticated using (exists (
+--        select 1 from public.users u where u.id = user_id and u.auth_id = auth.uid()));
+--
+-- Nada disso é necessário na v1.0: a identidade vem do user_id emitido pela API.
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- Confirmação: RLS ativo em todas as tabelas
+-- ---------------------------------------------------------------------------
+select relname as tabela, relrowsecurity as rls_ativo
+from pg_class
+where relnamespace = 'public'::regnamespace
+  and relname in ('users','questions','quiz_attempts','quiz_answers',
+                  'achievements','user_achievements','admin_tokens','audit_log')
+order by relname;
