@@ -197,9 +197,11 @@ export async function startAttempt({
 
   const allQuestions = await repo.listActiveQuestions();
   const selectedProphet = prophet && prophet !== 'todos' ? String(prophet) : null;
-  const prophetDistribution = { facil: 2, medio: 2, dificil: 1 };
+  // Banco de cada profeta tem 10 perguntas (4 fáceis + 4 médias + 2 difíceis).
+  // O quiz individual apresenta as 10, não uma amostra.
+  const prophetDistribution = { facil: 4, medio: 4, dificil: 2 };
   const questions = selectQuestions(
-    allQuestions, selectedMode, selectedProphet ? 5 : quizSize, random,
+    allQuestions, selectedMode, selectedProphet ? 10 : quizSize, random,
     selectedProphet ? prophetDistribution : MIXED_DISTRIBUTION, selectedProphet,
   );
   if (!questions.length) throw new ApiError(500, 'Nenhuma questão disponível no momento.');

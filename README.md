@@ -21,7 +21,7 @@ Os 12 Profetas Menores:
 
 O banco contém **120 perguntas — 10 para cada profeta**.
 
-- Quiz individual: 5 perguntas sorteadas do banco de 10 do profeta escolhido (a cada partida a combinação pode variar).
+- Quiz individual: as 10 perguntas do profeta escolhido, em ordem embaralhada.
 - Quiz geral: 20 perguntas, com distribuição 6 fáceis + 8 médias + 6 difíceis.
 - Pontuação calculada no servidor.
 - Ranking, histórico, estatísticas e conquistas.
