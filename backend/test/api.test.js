@@ -38,7 +38,7 @@ describe('API · Quiz Bíblico — Profetas Menores', { concurrency: 1 }, () => 
     assert.equal(res.status, 200);
     assert.equal(res.body.ok, true);
     assert.equal(res.body.db.driver, 'local');
-    assert.equal(res.body.db.counts.questions, 120);
+    assert.equal(res.body.db.counts.questions, 480);
   });
 
   test('GET /api lista os endpoints da API', async () => {
@@ -142,7 +142,7 @@ describe('API · Quiz Bíblico — Profetas Menores', { concurrency: 1 }, () => 
     const res = await api.start(token, { mode: 'dificil' });
     assert.equal(res.status, 201);
     assert.ok(res.body.questions.every((q) => q.difficulty === 'dificil'));
-    // 24 questões "dificil" no banco (2 por profeta x 12), mas o tamanho da
+    // 96 questões "dificil" no banco (8 por profeta x 12), mas o tamanho da
     // partida é limitado por QUIZ_SIZE (20 por padrão).
     assert.equal(res.body.questions.length, 20);
     assert.equal(res.body.attempt.mode, 'dificil');
@@ -642,7 +642,7 @@ describe('API · Quiz Bíblico — Profetas Menores', { concurrency: 1 }, () => 
     assert.equal(res.body.total_players, 1);
     assert.equal(res.body.total_attempts, 1);
     assert.equal(res.body.total_answers, 20);
-    assert.equal(res.body.total_questions, 120);
+    assert.equal(res.body.total_questions, 480);
     assert.equal(res.body.best_percentage, 95);
     assert.ok(res.body.avg_score > 0);
     assert.equal(res.body.most_wrong_question[0].wrong, 1);
@@ -652,8 +652,8 @@ describe('API · Quiz Bíblico — Profetas Menores', { concurrency: 1 }, () => 
   test('GET /api/questions lista o catálogo sem gabarito', async () => {
     const res = await api.get('/api/questions');
     assert.equal(res.status, 200);
-    assert.equal(res.body.total, 120);
-    assert.deepEqual(res.body.distribution, { facil: 48, medio: 48, dificil: 24 });
+    assert.equal(res.body.total, 480);
+    assert.deepEqual(res.body.distribution, { facil: 192, medio: 192, dificil: 96 });
     assert.ok(!JSON.stringify(res.body.items).includes('correct_answer'));
   });
 
@@ -675,8 +675,8 @@ describe('API · Quiz Bíblico — Profetas Menores', { concurrency: 1 }, () => 
 
     const ok = await api.get('/api/admin/overview', { token: ADMIN_TOKEN });
     assert.equal(ok.status, 200);
-    assert.equal(ok.body.stats.total_questions, 120);
-    assert.deepEqual(ok.body.distribution, { facil: 48, medio: 48, dificil: 24, inativas: 0 });
+    assert.equal(ok.body.stats.total_questions, 480);
+    assert.deepEqual(ok.body.distribution, { facil: 192, medio: 192, dificil: 96, inativas: 0 });
   });
 
   test('admin cadastra, edita e desativa questões', async () => {
@@ -699,7 +699,7 @@ describe('API · Quiz Bíblico — Profetas Menores', { concurrency: 1 }, () => 
     const id = created.body.question.id;
 
     const catalog = await api.get('/api/questions');
-    assert.equal(catalog.body.total, 121);
+    assert.equal(catalog.body.total, 481);
 
     const updated = await api.put(`/api/admin/questions/${id}`, { difficulty: 'dificil' }, { token: ADMIN_TOKEN });
     assert.equal(updated.status, 200);

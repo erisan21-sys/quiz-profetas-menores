@@ -158,10 +158,17 @@ export async function startAttempt({
   const selectedMode = normalizeMode(mode);
   if (!selectedMode) throw new ApiError(400, 'Modo de jogo inválido. Use mixed, facil, medio ou dificil.');
 
+  const requestedProphet = prophet && prophet !== 'todos' ? String(prophet) : null;
   const active = await repo.getActiveAttempt(userId);
   if (active) {
+    // Só reaproveitamos a partida em andamento se for EXATAMENTE o mesmo
+    // jogo (mesmo modo e mesmo profeta) que está sendo solicitado agora.
+    // Caso contrário, uma partida antiga e esquecida de outro profeta/modo
+    // não deve "vazar" perguntas e ordem repetidas para uma partida nova.
+    const sameGame = active.mode === selectedMode
+      && (active.prophet || 'todos') === (requestedProphet || 'todos');
     const ageSeconds = (now() - new Date(active.started_at)) / 1000;
-    if (ageSeconds <= ttlSeconds) {
+    if (sameGame && ageSeconds <= ttlSeconds) {
       const questions = await loadAttemptQuestions(repo, active);
       const answered = await repo.listAnswersByAttempt(active.id);
       const answeredIds = new Set(answered.map((a) => a.question_id));
@@ -196,12 +203,13 @@ export async function startAttempt({
   }
 
   const allQuestions = await repo.listActiveQuestions();
-  const selectedProphet = prophet && prophet !== 'todos' ? String(prophet) : null;
-  // Banco de cada profeta tem 10 perguntas (4 fáceis + 4 médias + 2 difíceis).
-  // O quiz individual apresenta as 10, não uma amostra.
-  const prophetDistribution = { facil: 4, medio: 4, dificil: 2 };
+  const selectedProphet = requestedProphet;
+  // Banco de cada profeta tem 40 perguntas (16 fáceis + 16 médias + 8 difíceis).
+  // O quiz individual sorteia 20 delas (8 fáceis + 8 médias + 4 difíceis),
+  // em ordem embaralhada a cada partida, para evitar repetição.
+  const prophetDistribution = { facil: 8, medio: 8, dificil: 4 };
   const questions = selectQuestions(
-    allQuestions, selectedMode, selectedProphet ? 10 : quizSize, random,
+    allQuestions, selectedMode, selectedProphet ? 20 : quizSize, random,
     selectedProphet ? prophetDistribution : MIXED_DISTRIBUTION, selectedProphet,
   );
   if (!questions.length) throw new ApiError(500, 'Nenhuma questão disponível no momento.');

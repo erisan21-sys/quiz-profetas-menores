@@ -19,10 +19,10 @@ Os 12 Profetas Menores:
 11. Zacarias
 12. Malaquias
 
-O banco contém **120 perguntas — 10 para cada profeta**.
+O banco contém **480 perguntas — 40 para cada profeta**.
 
-- Quiz individual: as 10 perguntas do profeta escolhido, em ordem embaralhada.
-- Quiz geral: 20 perguntas, com distribuição 6 fáceis + 8 médias + 6 difíceis.
+- Quiz individual: 20 das 40 perguntas do profeta escolhido, sorteadas e embaralhadas a cada partida.
+- Quiz geral: 20 perguntas, com distribuição 6 fáceis + 8 médias + 6 difíceis, sorteadas do banco completo.
 - Pontuação calculada no servidor.
 - Ranking, histórico, estatísticas e conquistas.
 - Área administrativa para gerenciar perguntas e jogadores.

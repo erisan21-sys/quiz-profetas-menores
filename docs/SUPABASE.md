@@ -20,7 +20,7 @@
      * `protect_answer_insert` — resposta só em partida STARTED, do dono, na ordem sorteada;
    * funções de leitura agregada: `leaderboard()`, `player_rank()`, `global_stats()`,
      `player_stats()`.
-2. `database/seed.sql` — 120 perguntas (10 por profeta) + 7 conquistas.
+2. `database/seed.sql` — 480 perguntas (40 por profeta) + 7 conquistas.
    Idempotente (`on conflict do nothing`).
 3. `database/rls.sql` — habilita RLS em todas as tabelas e cria as policies públicas.
 
